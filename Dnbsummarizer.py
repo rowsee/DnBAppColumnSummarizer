@@ -82,15 +82,22 @@ if uploaded_file is not None:
         st.warning("Please select at least one column.")
         st.stop()
 
-    # Save current column selection
-    config_json = json.dumps({"columns": selected_columns}, indent=2)
-    st.sidebar.download_button(
-        label="Download column config (JSON)",
-        data=config_json,
-        file_name="column_config.json",
-        mime="application/json",
-        help="Save this selection so you can load it again next time.",
+    # Optional JSON config download (separate from CSV download)
+    st.subheader("Save Column Selection (Optional)")
+    save_config = st.checkbox(
+        "I want to download my column selection as a JSON config file",
+        value=False,
+        help="Check this box if you want to save the selected columns and reuse them later.",
     )
+    if save_config:
+        config_json = json.dumps({"columns": selected_columns}, indent=2)
+        st.download_button(
+            label="Download column config (JSON)",
+            data=config_json,
+            file_name="column_config.json",
+            mime="application/json",
+            help="Save this selection so you can load it again next time.",
+        )
 
     # Duplicate Unique ID handling
     unique_id_col = "Unique ID"
