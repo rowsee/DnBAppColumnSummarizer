@@ -28,6 +28,49 @@ def to_csv_bytes(df):
     return df.to_csv(index=False).encode("utf-8")
 
 
+def risk_level_from_ssi_ser(value):
+    """Map SSI/SER numeric score (1-9) to risk level 1-4."""
+    try:
+        v = float(value)
+    except (ValueError, TypeError):
+        return 0
+    if v == 0:
+        return 0
+    if 1 <= v <= 2:
+        return 1  # Low
+    if 3 <= v <= 5:
+        return 2  # Medium
+    if 6 <= v <= 7:
+        return 3  # High
+    if 8 <= v <= 9:
+        return 4  # Critical
+    return 0
+
+
+def risk_level_from_dnb_rating(value):
+    """Map D&B Rating numeric score (1-4) to risk level 1-4."""
+    try:
+        v = float(value)
+    except (ValueError, TypeError):
+        return 0
+    if v == 0:
+        return 0
+    if 1 <= v <= 4:
+        return int(v)
+    return 0
+
+
+def calculate_consolidated_score(row, ssi_col, ser_col, dnb_col):
+    """Return the maximum risk level across SSI, SER, and D&B Rating."""
+    levels = [
+        risk_level_from_ssi_ser(row.get(ssi_col)),
+        risk_level_from_ssi_ser(row.get(ser_col)),
+        risk_level_from_dnb_rating(row.get(dnb_col)),
+    ]
+    non_zero = [lvl for lvl in levels if lvl != 0]
+    return max(non_zero) if non_zero else 0
+
+
 # Sidebar: saved config management
 st.sidebar.header("Saved Configurations")
 
@@ -141,8 +184,79 @@ if uploaded_file is not None:
             help="Save this selection so you can load it again next time.",
         )
 
+    # Consolidated Financial Risk Score
+    st.subheader("Consolidated Financial Risk Score")
+    st.markdown(
+        "Map SSI / SER / D&B Rating columns to a single risk score. "
+        "Scores are calculated using the Low/Medium/High/Critical ranges from the table."
+    )
+
+    enable_consolidated_score = st.checkbox(
+        "Add 'Consolidated Financial Risk Score' column",
+        value=True,
+        help="Uncheck if you do not want this extra column in the export.",
+    )
+
+    ssi_col = None
+    ser_col = None
+    dnb_col = None
+    if enable_consolidated_score:
+        default_ssi = "Third Party Risk Supplier Stability Index Class Score"
+        default_ser = "Third Party Risk Supplier Risk Score Raw Score"
+        default_dnb = "D&B Assessment Standard Rating Risk Segment"
+
+        ssi_col = st.selectbox(
+            "SSI column",
+            options=["(none)"] + all_columns,
+            index=(["(none)"] + all_columns).index(default_ssi)
+            if default_ssi in all_columns
+            else 0,
+            help="Values 1-9: Low=1-2, Medium=3-5, High=6-7, Critical=8-9.",
+        )
+        ssi_col = None if ssi_col == "(none)" else ssi_col
+
+        ser_col = st.selectbox(
+            "SER column",
+            options=["(none)"] + all_columns,
+            index=(["(none)"] + all_columns).index(default_ser)
+            if default_ser in all_columns
+            else 0,
+            help="Values 1-9: Low=1-2, Medium=3-5, High=6-7, Critical=8-9.",
+        )
+        ser_col = None if ser_col == "(none)" else ser_col
+
+        dnb_col = st.selectbox(
+            "D&B Rating column",
+            options=["(none)"] + all_columns,
+            index=(["(none)"] + all_columns).index(default_dnb)
+            if default_dnb in all_columns
+            else 0,
+            help="Values 1-4: Low=1, Medium=2, High=3, Critical=4.",
+        )
+        dnb_col = None if dnb_col == "(none)" else dnb_col
+
+    # Replace blank cells in selected columns with 0
+    df_filled = df[selected_columns].copy()
+    df_filled = df_filled.replace(r"^\s*$", "0", regex=True)
+    df_filled = df_filled.fillna("0")
+
+    if enable_consolidated_score:
+        score_cols = [c for c in [ssi_col, ser_col, dnb_col] if c is not None]
+        if score_cols:
+            df_filled["Consolidated Financial Risk Score"] = df_filled.apply(
+                lambda row: calculate_consolidated_score(row, ssi_col, ser_col, dnb_col),
+                axis=1,
+            )
+            # Move the new column to the front
+            new_col = "Consolidated Financial Risk Score"
+            cols = [new_col] + [c for c in df_filled.columns if c != new_col]
+            df_filled = df_filled[cols]
+        else:
+            st.warning("No SSI/SER/D&B Rating columns selected. Skipping consolidated score.")
+            enable_consolidated_score = False
+
     # Duplicate Unique ID handling
-    filtered_df = df[selected_columns].copy()
+    filtered_df = df_filled.copy()
 
     if unique_id_col in filtered_df.columns:
         st.subheader("Duplicate 'Unique ID' Check")
