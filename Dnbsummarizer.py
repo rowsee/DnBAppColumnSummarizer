@@ -247,10 +247,10 @@ if uploaded_file is not None:
                 lambda row: calculate_consolidated_score(row, ssi_col, ser_col, dnb_col),
                 axis=1,
             )
-            # Move the new column to the front
-            new_col = "Consolidated Financial Risk Score"
-            cols = [new_col] + [c for c in df_filled.columns if c != new_col]
-            df_filled = df_filled[cols]
+            df_filled["Risk Level"] = df_filled["Consolidated Financial Risk Score"].map(
+                {0: "No Data", 1: "Low", 2: "Medium", 3: "High", 4: "Critical"}
+            )
+            # Keep both new columns at the end of the dataframe
         else:
             st.warning("No SSI/SER/D&B Rating columns selected. Skipping consolidated score.")
             enable_consolidated_score = False
