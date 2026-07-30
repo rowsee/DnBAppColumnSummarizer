@@ -105,45 +105,23 @@ if uploaded_file is not None:
 
     unique_id_col = "Unique ID"
 
-    # Filter by suffix after "_" in Unique ID
+    # Remove suffix after "_" from Unique ID
     if unique_id_col in df.columns:
-        st.subheader("Filter by Unique ID Suffix")
-        st.markdown(
-            "Select which suffix values (the part after the underscore in **Unique ID**) you want to keep."
+        st.subheader("Clean Unique ID")
+        remove_suffix = st.checkbox(
+            "Remove suffix from Unique ID (e.g., 0000399155_1 → 0000399155)",
+            value=True,
+            help="Strips everything from the last underscore onward.",
         )
 
-        def extract_suffix(uid):
-            if pd.isna(uid):
-                return "(blank)"
-            uid = str(uid)
-            if "_" in uid:
-                return uid.rsplit("_", 1)[-1]
-            return "(no suffix)"
-
-        df["_tmp_unique_id_suffix"] = df[unique_id_col].apply(extract_suffix)
-        suffix_counts = df["_tmp_unique_id_suffix"].value_counts().sort_index()
-        suffix_options = suffix_counts.index.tolist()
-        suffix_option_labels = [
-            f"{suffix} ({suffix_counts[suffix]} rows)" for suffix in suffix_options
-        ]
-
-        selected_suffixes = st.multiselect(
-            "Unique ID suffixes to include",
-            options=suffix_options,
-            default=suffix_options,
-            format_func=lambda x: f"{x} ({suffix_counts[x]} rows)",
-            help="e.g., '1' from IDs like '0000399155_1'. '(no suffix)' means no underscore in the ID.",
-        )
-
-        if not selected_suffixes:
-            st.warning("Please select at least one suffix.")
-            st.stop()
-
-        df = df[df["_tmp_unique_id_suffix"].isin(selected_suffixes)].copy()
-        df = df.drop(columns=["_tmp_unique_id_suffix"])
-        st.write(f"**Filtered rows:** {len(df)}")
+        if remove_suffix:
+            original_sample = df[unique_id_col].head(3).tolist()
+            df[unique_id_col] = df[unique_id_col].astype(str).str.rsplit("_", n=1).str[0]
+            cleaned_sample = df[unique_id_col].head(3).tolist()
+            st.write("Example:")
+            st.write(dict(zip(original_sample, cleaned_sample)))
     else:
-        st.info(f"Column '{unique_id_col}' not found. Skipping suffix filter.")
+        st.info(f"Column '{unique_id_col}' not found. Skipping Unique ID cleaning.")
 
     all_columns = df.columns.tolist()
 
