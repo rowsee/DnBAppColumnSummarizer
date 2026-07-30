@@ -28,47 +28,62 @@ def to_csv_bytes(df):
     return df.to_csv(index=False).encode("utf-8")
 
 
-def risk_level_from_ssi_ser(value):
-    """Map SSI/SER numeric score (1-9) to risk level 1-4."""
+def to_float(value):
+    """Convert a value to float; return 0.0 for blanks/non-numeric."""
     try:
-        v = float(value)
+        return float(value)
     except (ValueError, TypeError):
-        return 0
-    if v == 0:
-        return 0
-    if 1 <= v <= 2:
-        return 1  # Low
-    if 3 <= v <= 5:
-        return 2  # Medium
-    if 6 <= v <= 7:
-        return 3  # High
-    if 8 <= v <= 9:
-        return 4  # Critical
-    return 0
-
-
-def risk_level_from_dnb_rating(value):
-    """Map D&B Rating numeric score (1-4) to risk level 1-4."""
-    try:
-        v = float(value)
-    except (ValueError, TypeError):
-        return 0
-    if v == 0:
-        return 0
-    if 1 <= v <= 4:
-        return int(v)
-    return 0
+        return 0.0
 
 
 def calculate_consolidated_score(row, ssi_col, ser_col, dnb_col):
-    """Return the maximum risk level across SSI, SER, and D&B Rating."""
-    levels = [
-        risk_level_from_ssi_ser(row.get(ssi_col)),
-        risk_level_from_ssi_ser(row.get(ser_col)),
-        risk_level_from_dnb_rating(row.get(dnb_col)),
-    ]
-    non_zero = [lvl for lvl in levels if lvl != 0]
-    return max(non_zero) if non_zero else 0
+    """Return weighted-average score using 40% SSI, 40% SER, 20% D&B Rating.
+
+    The raw numeric values from each selected column are used directly.
+    A selected column with 0, blank, or non-numeric data contributes 0 with its
+    full weight. Only columns that are not selected at all are excluded, and their
+    weights are re-normalized across the selected columns.
+    """
+    components = {
+        "ssi": {
+            "weight": 0.4,
+            "selected": ssi_col is not None,
+            "value": to_float(row.get(ssi_col)) if ssi_col else 0.0,
+        },
+        "ser": {
+            "weight": 0.4,
+            "selected": ser_col is not None,
+            "value": to_float(row.get(ser_col)) if ser_col else 0.0,
+        },
+        "dnb": {
+            "weight": 0.2,
+            "selected": dnb_col is not None,
+            "value": to_float(row.get(dnb_col)) if dnb_col else 0.0,
+        },
+    }
+    selected = {k: v for k, v in components.items() if v["selected"]}
+    if not selected:
+        return 0
+    weight_sum = sum(v["weight"] for v in selected.values())
+    weighted = sum(v["value"] * v["weight"] for v in selected.values()) / weight_sum
+    return round(weighted, 2)
+
+
+def risk_level_from_weighted_score(score):
+    """Map a weighted consolidated score to a Low/Medium/High/Critical label.
+
+    Uses continuous SSI/SER-style bands on the consolidated raw-score scale:
+    Low < 2.5, Medium 2.5-5.5, High 5.5-7.5, Critical > 7.5.
+    """
+    if score == 0:
+        return "No Data"
+    if score < 2.5:
+        return "Low"
+    if score < 5.5:
+        return "Medium"
+    if score < 7.5:
+        return "High"
+    return "Critical"
 
 
 # Sidebar: saved config management
@@ -166,7 +181,10 @@ if uploaded_file is not None:
     st.subheader("Consolidated Financial Risk Score")
     st.markdown(
         "Map SSI / SER / D&B Rating columns to a single risk score. "
-        "Scores are calculated using the Low/Medium/High/Critical ranges from the table."
+        "The raw numeric values from each selected column are combined with weighted averaging: "
+        "**40% SSI + 40% SER + 20% D&B Rating**. "
+        "A selected column with 0, blank, or non-numeric data contributes 0 with its full weight. "
+        "Only columns that are not selected at all are excluded, and their weights are re-normalized."
     )
 
     enable_consolidated_score = st.checkbox(
@@ -226,7 +244,7 @@ if uploaded_file is not None:
                 axis=1,
             )
             df_filled["Risk Level"] = df_filled["Consolidated Financial Risk Score"].map(
-                {0: "No Data", 1: "Low", 2: "Medium", 3: "High", 4: "Critical"}
+                risk_level_from_weighted_score
             )
             # Keep both new columns at the end of the dataframe
         else:
