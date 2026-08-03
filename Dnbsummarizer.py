@@ -28,6 +28,16 @@ def to_csv_bytes(df):
     return df.to_csv(index=False).encode("utf-8")
 
 
+def to_excel_bytes(instructions_df, consolidated_df, full_df):
+    """Create an Excel workbook with three sheets and return as bytes."""
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        instructions_df.to_excel(writer, sheet_name="Instructions", index=False)
+        consolidated_df.to_excel(writer, sheet_name="Consolidated", index=False)
+        full_df.to_excel(writer, sheet_name="Full Data", index=False)
+    return output.getvalue()
+
+
 def to_float(value):
     """Convert a value to float; return 0.0 for blanks/non-numeric."""
     try:
@@ -231,6 +241,11 @@ if uploaded_file is not None:
         )
         dnb_col = None if dnb_col == "(none)" else dnb_col
 
+    # Prepare two output dataframes:
+    # - df_filled: selected columns, blanks filled with 0, plus consolidated score
+    # - df_full: all original columns, plus consolidated score
+    df_full = df.copy()
+
     # Replace blank cells in selected columns with 0
     df_filled = df[selected_columns].copy()
     df_filled = df_filled.replace(r"^\s*$", "0", regex=True)
@@ -246,7 +261,15 @@ if uploaded_file is not None:
             df_filled["Risk Level"] = df_filled["Consolidated Financial Risk Score"].map(
                 risk_level_from_weighted_score
             )
-            # Keep both new columns at the end of the dataframe
+
+            df_full["Consolidated Financial Risk Score"] = df_full.apply(
+                lambda row: calculate_consolidated_score(row, ssi_col, ser_col, dnb_col),
+                axis=1,
+            )
+            df_full["Risk Level"] = df_full["Consolidated Financial Risk Score"].map(
+                risk_level_from_weighted_score
+            )
+            # Keep both new columns at the end of each dataframe
         else:
             st.warning("No SSI/SER/D&B Rating columns selected. Skipping consolidated score.")
             enable_consolidated_score = False
@@ -272,8 +295,40 @@ if uploaded_file is not None:
             st.success(f"No duplicate '{unique_id_col}' values found.")
 
         filtered_df = filtered_df.drop_duplicates(subset=[unique_id_col], keep="first")
+        if unique_id_col in df_full.columns:
+            df_full = df_full.drop_duplicates(subset=[unique_id_col], keep="first")
     else:
         st.info(f"Column '{unique_id_col}' not found in the uploaded file. Skipping duplicate check.")
+
+    # Build the Instructions sheet
+    instructions_data = {
+        "Instructions": [
+            "D&B Column Selector - Output Workbook",
+            "",
+            "This workbook contains three tabs:",
+            "  1. Instructions - overview and methodology",
+            "  2. Consolidated - selected columns with the consolidated financial risk score",
+            "  3. Full Data - all input columns with the consolidated financial risk score",
+            "",
+            "Consolidated Financial Risk Score calculation:",
+            "  - 40% Third Party Risk Supplier Stability Index Class Score",
+            "  - 40% Third Party Risk Supplier Risk Score Raw Score",
+            "  - 20% D&B Assessment Standard Rating Risk Segment",
+            "",
+            "Notes:",
+            "  - A selected column with 0, blank, or non-numeric data contributes 0 with its full weight.",
+            "  - Only columns that are not selected at all are excluded, and their weights are re-normalized.",
+            "  - Duplicate Unique IDs are removed, keeping the first occurrence.",
+            "",
+            "Risk Level bands:",
+            "  - Low: score < 2.5",
+            "  - Medium: 2.5 <= score < 5.5",
+            "  - High: 5.5 <= score < 7.5",
+            "  - Critical: score >= 7.5",
+            "  - No Data: score = 0",
+        ]
+    }
+    instructions_df = pd.DataFrame(instructions_data)
 
     # Preview
     st.subheader("Preview")
@@ -281,15 +336,15 @@ if uploaded_file is not None:
 
     st.write(f"**Output rows:** {len(filtered_df)} | **Output columns:** {len(filtered_df.columns)}")
 
-    # Download
-    output_csv = to_csv_bytes(filtered_df)
-    output_file_name = uploaded_file.name.rsplit(".", 1)[0] + "_selected.csv"
+    # Download as multi-sheet Excel
+    output_excel = to_excel_bytes(instructions_df, filtered_df, df_full)
+    output_file_name = uploaded_file.name.rsplit(".", 1)[0] + "_selected.xlsx"
 
     st.download_button(
-        label="Download selected columns as CSV",
-        data=output_csv,
+        label="Download as Excel (3 tabs)",
+        data=output_excel,
         file_name=output_file_name,
-        mime="text/csv",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 else:
     st.info("Upload a file to get started.")
