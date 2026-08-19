@@ -274,6 +274,13 @@ if uploaded_file is not None:
             st.warning("No SSI/SER/D&B Rating columns selected. Skipping consolidated score.")
             enable_consolidated_score = False
 
+    # Rename the D&B Rating column in the output for readability
+    old_dnb_name = "D&B Assessment Standard Rating Risk Segment"
+    new_dnb_name = "D&B Rating"
+    for frame in [df_filled, df_full]:
+        if old_dnb_name in frame.columns:
+            frame.rename(columns={old_dnb_name: new_dnb_name}, inplace=True)
+
     # Duplicate Unique ID handling
     filtered_df = df_filled.copy()
 
