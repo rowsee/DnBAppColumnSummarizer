@@ -5,8 +5,8 @@ st.set_page_config(page_title="Append Additional Suppliers", layout="wide")
 
 st.title("Append Additional Suppliers")
 st.markdown(
-    "Combine existing D&B suppliers from the Full Output with new additional suppliers "
-    "into a single D&B Connect upload CSV."
+    "Upload the latest D&B Full Output and an Additional Supplier list to generate a single "
+    "D&B Connect upload CSV."
 )
 
 # Exact D&B Connect CSV Template columns (trailing spaces preserved)
@@ -35,9 +35,8 @@ TEMPLATE_COLS = [
     "Custom Field 5 ",
 ]
 
-EXISTING_FILE = "DBTemplateSJ20260911_Full_Output.csv"
-
 DUNS_COL = "D-U-N-S Number"
+MATCHED_DUNS_COL = "Matched D-U-N-S Number"
 
 
 def read_uploaded_file(file):
@@ -56,8 +55,22 @@ def normalize_col_name(col):
     return col.strip() if isinstance(col, str) else col
 
 
+def find_column(df, target):
+    """Return the actual column name in df whose stripped name matches target."""
+    target_clean = normalize_col_name(target)
+    for col in df.columns:
+        if normalize_col_name(col) == target_clean:
+            return col
+    return None
+
+
 def convert_full_output_to_template(df_full, template_cols):
-    """Map Full Output columns to the exact D&B Connect template format."""
+    """Map Full Output columns to the exact D&B Connect template format.
+
+    Uses Matched D-U-N-S Number (Column W) as the D-U-N-S Number in the template.
+    Returns the converted DataFrame and a boolean indicating whether the matched
+    D-U-N-S Number was found and used.
+    """
     df_out = pd.DataFrame(columns=template_cols)
 
     full_cols_normalized = {normalize_col_name(c): c for c in df_full.columns}
@@ -68,7 +81,14 @@ def convert_full_output_to_template(df_full, template_cols):
             source_col = full_cols_normalized[key]
             df_out[template_col] = df_full[source_col]
 
-    return df_out
+    # Override D-U-N-S Number with Matched D-U-N-S Number (Column W)
+    matched_duns_col = find_column(df_full, MATCHED_DUNS_COL)
+    used_matched_duns = matched_duns_col is not None
+
+    if used_matched_duns:
+        df_out[DUNS_COL] = df_full[matched_duns_col]
+
+    return df_out, used_matched_duns
 
 
 def align_to_template(df_in, template_cols):
@@ -96,36 +116,52 @@ def clean_duns(value):
 # Use the embedded D&B Connect template columns
 template_cols = TEMPLATE_COLS
 
-st.subheader("Step 1: Existing Suppliers")
-st.markdown(
-    f"Loading existing suppliers from **{EXISTING_FILE}** and converting them to the D&B Connect template format."
-)
-
-try:
-    df_existing_full = pd.read_csv(EXISTING_FILE, dtype=str)
-    df_existing = convert_full_output_to_template(df_existing_full, template_cols)
-except Exception as e:
-    st.error(f"Could not read existing Full Output file '{EXISTING_FILE}': {e}")
-    st.stop()
-
-st.write(f"Existing suppliers loaded: **{len(df_existing)}** rows")
-
-existing_duns = set(
-    df_existing[DUNS_COL].apply(clean_duns).replace("", pd.NA).dropna()
+st.subheader("Step 1: Upload D&B Full Output")
+full_output_file = st.file_uploader(
+    "Upload the D&B Full Output file (CSV or Excel)",
+    type=["csv", "xlsx", "xls"],
+    key="full_output_uploader",
 )
 
 st.subheader("Step 2: Upload Additional Suppliers")
-uploaded_file = st.file_uploader(
+additional_file = st.file_uploader(
     "Upload the Additional Supplier file (CSV or Excel)",
     type=["csv", "xlsx", "xls"],
     key="additional_supplier_uploader",
 )
 
-if uploaded_file is not None:
+if full_output_file is not None and additional_file is not None:
+    # Read Full Output
     try:
-        df_additional_raw = read_uploaded_file(uploaded_file)
+        df_full_output = read_uploaded_file(full_output_file)
     except Exception as e:
-        st.error(f"Error reading uploaded file: {e}")
+        st.error(f"Error reading Full Output file: {e}")
+        st.stop()
+
+    st.write(f"Full Output loaded: **{len(df_full_output)}** rows")
+
+    # Convert Full Output to template format
+    df_existing, used_matched_duns = convert_full_output_to_template(df_full_output, template_cols)
+
+    if not used_matched_duns:
+        st.warning(
+            f"Column '{MATCHED_DUNS_COL}' (Column W) was not found in the Full Output. "
+            f"The '{DUNS_COL}' field may not be populated correctly."
+        )
+    else:
+        st.success(f"Used '{MATCHED_DUNS_COL}' (Column W) as the D-U-N-S Number.")
+
+    st.write(f"Existing suppliers converted: **{len(df_existing)}** rows")
+
+    existing_duns = set(
+        df_existing[DUNS_COL].apply(clean_duns).replace("", pd.NA).dropna()
+    )
+
+    # Read Additional Suppliers
+    try:
+        df_additional_raw = read_uploaded_file(additional_file)
+    except Exception as e:
+        st.error(f"Error reading Additional Supplier file: {e}")
         st.stop()
 
     st.write(f"Additional suppliers uploaded: **{len(df_additional_raw)}** rows")
@@ -135,7 +171,7 @@ if uploaded_file is not None:
 
     # Validate that we have the key DUNS column
     if DUNS_COL not in df_additional.columns:
-        st.error(f"Uploaded file is missing the required '{DUNS_COL}' column.")
+        st.error(f"Uploaded Additional Supplier file is missing the required '{DUNS_COL}' column.")
         st.stop()
 
     # Show preview
@@ -202,5 +238,9 @@ if uploaded_file is not None:
         file_name="D&B_Connect_Upload.csv",
         mime="text/csv",
     )
+elif full_output_file is None and additional_file is None:
+    st.info("Upload both the D&B Full Output and the Additional Supplier file to get started.")
+elif full_output_file is None:
+    st.info("Please upload the D&B Full Output file.")
 else:
-    st.info("Upload an Additional Supplier file to generate the combined D&B Connect CSV.")
+    st.info("Please upload the Additional Supplier file.")
