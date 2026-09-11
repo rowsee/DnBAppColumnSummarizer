@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-from io import BytesIO
 
 st.set_page_config(page_title="Append Additional Suppliers", layout="wide")
 
@@ -10,7 +9,32 @@ st.markdown(
     "into a single D&B Connect upload CSV."
 )
 
-TEMPLATE_FILE = "DnB Connect Sample CSV Template.xlsx"
+# Exact D&B Connect CSV Template columns (trailing spaces preserved)
+TEMPLATE_COLS = [
+    "Unique ID ",
+    "D-U-N-S Number",
+    "Registration Number",
+    "Company Name ",
+    "Street Address Line 1",
+    "Street Address Line 2",
+    "City / Town",
+    "State / Province",
+    "County ",
+    "Postal Code",
+    "Country ",
+    "Telephone Number",
+    "URL ",
+    "Email",
+    " D&B Contact ID",
+    " First Name",
+    " Family Name",
+    " Custom Field 1",
+    "Custom Field 2",
+    "Custom Field 3 ",
+    "Custom Field 4 ",
+    "Custom Field 5 ",
+]
+
 EXISTING_FILE = "DBTemplateSJ20260911_Full_Output.csv"
 
 DUNS_COL = "D-U-N-S Number"
@@ -25,12 +49,6 @@ def read_uploaded_file(file):
         return pd.read_excel(file, dtype=str)
     else:
         raise ValueError("Unsupported file type. Please upload a CSV or Excel file.")
-
-
-def load_template_columns():
-    """Read the D&B Connect Sample CSV Template and return its exact column headers."""
-    df = pd.read_excel(TEMPLATE_FILE, nrows=0)
-    return df.columns.tolist()
 
 
 def normalize_col_name(col):
@@ -75,12 +93,8 @@ def clean_duns(value):
     return str(value).strip()
 
 
-# Load template columns (exact spelling including trailing spaces)
-try:
-    template_cols = load_template_columns()
-except Exception as e:
-    st.error(f"Could not read D&B Connect template file '{TEMPLATE_FILE}': {e}")
-    st.stop()
+# Use the embedded D&B Connect template columns
+template_cols = TEMPLATE_COLS
 
 st.subheader("Step 1: Existing Suppliers")
 st.markdown(
