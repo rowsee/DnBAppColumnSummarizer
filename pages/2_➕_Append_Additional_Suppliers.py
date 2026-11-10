@@ -187,14 +187,12 @@ if full_output_file is not None and additional_file is not None:
     duplicate_mask = df_additional["_duns_clean"].isin(existing_duns)
     duplicate_count = duplicate_mask.sum()
 
-    df_new = df_additional[~(empty_duns_mask | duplicate_mask)].copy()
-    df_skipped_empty = df_additional[empty_duns_mask].copy()
+    # Keep rows with empty DUNS (D&B Connect will match them later); only drop real duplicates
+    df_new = df_additional[~duplicate_mask].copy()
     df_skipped_dupes = df_additional[duplicate_mask].copy()
 
     # Remove helper column
     df_new = df_new.drop(columns=["_duns_clean"])
-    if not df_skipped_empty.empty:
-        df_skipped_empty = df_skipped_empty.drop(columns=["_duns_clean"])
     if not df_skipped_dupes.empty:
         df_skipped_dupes = df_skipped_dupes.drop(columns=["_duns_clean"])
 
@@ -203,7 +201,7 @@ if full_output_file is not None and additional_file is not None:
     if empty_duns_count > 0:
         st.warning(
             f"Found **{empty_duns_count}** additional supplier row(s) with an empty D-U-N-S Number. "
-            "These will be kept in the output (D&B Connect will attempt to match them), "
+            "These rows will be kept in the output so D&B Connect can attempt to match them, "
             "but they cannot be checked for duplicates."
         )
 
