@@ -153,10 +153,6 @@ if full_output_file is not None and additional_file is not None:
 
     st.write(f"Existing suppliers converted: **{len(df_existing)}** rows")
 
-    existing_duns = set(
-        df_existing[DUNS_COL].apply(clean_duns).replace("", pd.NA).dropna()
-    )
-
     # Read Additional Suppliers
     try:
         df_additional_raw = read_uploaded_file(additional_file)
@@ -178,51 +174,43 @@ if full_output_file is not None and additional_file is not None:
     st.subheader("Preview of Additional Suppliers")
     st.dataframe(df_additional.head(50), use_container_width=True)
 
-    # Deduplicate
-    df_additional["_duns_clean"] = df_additional[DUNS_COL].apply(clean_duns)
+    # Combine existing + additional first
+    df_combined_raw = pd.concat([df_existing, df_additional], ignore_index=True)
 
-    empty_duns_mask = df_additional["_duns_clean"] == ""
-    empty_duns_count = empty_duns_mask.sum()
+    st.subheader("Step 3: Combine and Remove Duplicates")
+    st.write(f"Rows before duplicate removal: **{len(df_combined_raw)}**")
 
-    duplicate_mask = df_additional["_duns_clean"].isin(existing_duns)
-    duplicate_count = duplicate_mask.sum()
+    # Deduplicate on the final combined file
+    df_combined_raw["_duns_clean"] = df_combined_raw[DUNS_COL].apply(clean_duns)
 
-    # Keep rows with empty DUNS (D&B Connect will match them later); only drop real duplicates
-    df_new = df_additional[~duplicate_mask].copy()
-    df_skipped_dupes = df_additional[duplicate_mask].copy()
+    empty_duns_mask = df_combined_raw["_duns_clean"] == ""
+    non_empty_duns = df_combined_raw[~empty_duns_mask].copy()
+    empty_duns = df_combined_raw[empty_duns_mask].copy()
 
-    # Remove helper column
-    df_new = df_new.drop(columns=["_duns_clean"])
-    if not df_skipped_dupes.empty:
-        df_skipped_dupes = df_skipped_dupes.drop(columns=["_duns_clean"])
+    # Drop duplicates only among rows with a non-empty DUNS, keeping the first occurrence
+    non_empty_duns_deduped = non_empty_duns.drop_duplicates(subset=[DUNS_COL], keep="first")
 
-    st.subheader("Step 3: Duplicate Check")
+    # Count duplicates removed
+    duplicates_removed = len(non_empty_duns) - len(non_empty_duns_deduped)
 
-    if empty_duns_count > 0:
+    # Reassemble: deduplicated non-empty DUNS + all empty DUNS rows
+    df_combined = pd.concat([non_empty_duns_deduped, empty_duns], ignore_index=True)
+    df_combined = df_combined.drop(columns=["_duns_clean"])
+
+    if duplicates_removed > 0:
         st.warning(
-            f"Found **{empty_duns_count}** additional supplier row(s) with an empty D-U-N-S Number. "
-            "These rows will be kept in the output so D&B Connect can attempt to match them, "
-            "but they cannot be checked for duplicates."
+            f"Removed **{duplicates_removed}** duplicate row(s) based on D-U-N-S Number. "
+            "The first occurrence was kept."
         )
-
-    if duplicate_count > 0:
-        st.warning(
-            f"Found **{duplicate_count}** additional supplier row(s) whose D-U-N-S Number already exists in the existing dataset. "
-            "These duplicates will be skipped."
-        )
-        with st.expander("Show skipped duplicate D-U-N-S Numbers"):
-            st.dataframe(df_skipped_dupes[[DUNS_COL, "Company Name "]].reset_index(drop=True), use_container_width=True)
+        with st.expander("Show duplicate D-U-N-S Numbers removed"):
+            dupes = non_empty_duns[non_empty_duns[DUNS_COL].duplicated(keep=False)]
+            st.dataframe(dupes[[DUNS_COL, "Company Name "]].reset_index(drop=True), use_container_width=True)
     else:
-        st.success("No duplicate D-U-N-S Numbers found.")
+        st.success("No duplicate D-U-N-S Numbers found in the combined file.")
 
-    # Combine
-    df_combined = pd.concat([df_existing, df_new], ignore_index=True)
-
-    st.subheader("Step 4: Combined Output")
+    st.subheader("Step 4: Final Combined Output")
     st.write(
-        f"**Existing suppliers:** {len(df_existing)} | "
-        f"**New suppliers added:** {len(df_new)} | "
-        f"**Total rows:** {len(df_combined)}"
+        f"**Rows after duplicate removal:** {len(df_combined)}"
     )
 
     st.dataframe(df_combined.head(50), use_container_width=True)
